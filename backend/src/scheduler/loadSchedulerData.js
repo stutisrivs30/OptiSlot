@@ -223,7 +223,9 @@ async function loadSchedulerData() {
     });
 
     return {
-        candidates,
+        candidates: candidates.filter(
+        (candidate) => candidate.availability.length > 0
+        ),
         interviewers,
         rooms,
         roundDefinitions
