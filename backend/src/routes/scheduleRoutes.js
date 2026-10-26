@@ -9,32 +9,34 @@ const {
 
 const router = express.Router();
 
+
+
 async function getExistingSchedule(db = pool) {
     const result = await db.query(`
         SELECT
             i.id AS "databaseId",
             i.candidate_id AS "candidateId",
             i.interviewer_id AS "interviewerId",
-            i.room_id AS "roomId",
-            i.round_id AS "roundId",
-            i.start_time AS start,
-            i.end_time AS "end"
+            a.start_time AS start,
+            a.end_time AS "end"
         FROM interviews i
+        JOIN availability_slots a
+            ON a.id = i.slot_id
         WHERE i.status = 'scheduled'
-          AND i.start_time IS NOT NULL
-          AND i.end_time IS NOT NULL
     `);
 
-    return result.rows.map(row => ({
+    return result.rows.map((row) => ({
         interviewId: String(row.databaseId),
         candidateId: String(row.candidateId),
         interviewerId: String(row.interviewerId),
-        roomId: row.roomId == null ? null : String(row.roomId),
-        roundId: row.roundId,
+        roomId: null,
+        roundId: null,
         start: new Date(row.start).toISOString(),
         end: new Date(row.end).toISOString()
     }));
 }
+
+
 
 // Generate a schedule preview without saving it.
 router.post("/generate", async (req, res) => {
@@ -76,6 +78,10 @@ router.post("/generate", async (req, res) => {
 });
 
 // Retrieve saved interviews.
+
+// Retrieve saved interviews.
+
+// Retrieve saved interviews.
 router.get("/", async (req, res) => {
     try {
         const result = await pool.query(`
@@ -85,21 +91,23 @@ router.get("/", async (req, res) => {
                 cu.full_name AS "candidateName",
                 i.interviewer_id AS "interviewerId",
                 iu.full_name AS "interviewerName",
-                i.round_id AS "roundId",
-                r.name AS "roundName",
-                i.room_id AS "roomId",
-                rm.name AS "roomName",
-                i.start_time AS start,
-                i.end_time AS "end",
+                NULL AS "roundId",
+                NULL AS "roundName",
+                NULL AS "roomId",
+                NULL AS "roomName",
+                a.start_time AS start,
+                a.end_time AS "end",
                 i.status,
                 i.meeting_link AS "meetingLink",
                 i.notes
             FROM interviews i
-            JOIN users cu ON cu.id = i.candidate_id
-            JOIN users iu ON iu.id = i.interviewer_id
-            LEFT JOIN interview_rounds r ON r.id = i.round_id
-            LEFT JOIN rooms rm ON rm.id = i.room_id
-            ORDER BY i.start_time NULLS LAST, i.id
+            JOIN users cu
+                ON cu.id = i.candidate_id
+            JOIN users iu
+                ON iu.id = i.interviewer_id
+            LEFT JOIN availability_slots a
+                ON a.id = i.slot_id
+            ORDER BY a.start_time NULLS LAST, i.id
         `);
 
         res.json({
@@ -109,12 +117,15 @@ router.get("/", async (req, res) => {
         });
     } catch (error) {
         console.error("Fetching interviews failed:", error.message);
+
         res.status(500).json({
             success: false,
             message: "Could not fetch interviews."
         });
     }
 });
+
+
 
 // Get valid choices for a candidate's current round.
 router.get("/candidates/:candidateId/slots", async (req, res) => {
@@ -349,19 +360,52 @@ router.post("/confirm", async (req, res) => {
             }
 
             // Reuse an existing available slot, or create one if none exists.
-const slot = await client.query(`
-    INSERT INTO availability_slots
-        (interviewer_id, start_time, end_time, status)
-    VALUES ($1, $2, $3, 'booked')
-    ON CONFLICT (interviewer_id, start_time, end_time)
-    DO UPDATE SET status = 'booked'
-    WHERE availability_slots.status = 'available'
-    RETURNING id
-`, [interviewerId, start.toISOString(), end.toISOString()]);
 
-if (!slot.rowCount) {
-    throw new Error("The selected interviewer slot is no longer available.");
-}
+            // Use the exact existing slot, or create a booked
+            // sub-slot within the interviewer's availability.
+            const existingSlot = await client.query(`
+                SELECT id, status
+                FROM availability_slots
+                WHERE interviewer_id = $1
+                  AND start_time = $2
+                  AND end_time = $3
+                FOR UPDATE
+            `, [
+                interviewerId,
+                start.toISOString(),
+                end.toISOString()
+            ]);
+
+            let slotId;
+
+            if (existingSlot.rowCount > 0) {
+                if (existingSlot.rows[0].status !== "available") {
+                    throw new Error(
+                        "The selected interviewer slot is already booked."
+                    );
+                }
+
+                slotId = existingSlot.rows[0].id;
+
+                await client.query(`
+                    UPDATE availability_slots
+                    SET status = 'booked'
+                    WHERE id = $1
+                `, [slotId]);
+            } else {
+                const newSlot = await client.query(`
+                    INSERT INTO availability_slots
+                        (interviewer_id, start_time, end_time, status)
+                    VALUES ($1, $2, $3, 'booked')
+                    RETURNING id
+                `, [
+                    interviewerId,
+                    start.toISOString(),
+                    end.toISOString()
+                ]);
+
+                slotId = newSlot.rows[0].id;
+            }
 
             const interview = await client.query(`
                 INSERT INTO interviews
@@ -374,7 +418,7 @@ if (!slot.rowCount) {
             `, [
                 candidateId,
                 interviewerId,
-                slot.rows[0].id,
+                slotId,
                 booking.roundId,
                 roomId,
                 start.toISOString(),

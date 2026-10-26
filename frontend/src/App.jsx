@@ -1,6 +1,9 @@
 
-import { useEffect, useState } from "react";useEffect
+import { useEffect, useState } from "react";
 import { apiRequest } from "./services/api";
+import InterviewerDashboard from "./pages/InterviewerDashboard";
+import CalendarPage from "./pages/CalendarPage";
+import CandidateDashboard from "./pages/CandidateDashboard";
 import {
   LayoutDashboard,
   CalendarDays,
@@ -20,6 +23,9 @@ import {
 import "./App.css";
 
 const navigation = [
+  { label: "Calendar", icon: CalendarDays },
+  { label: "Interviewer Dashboard", icon: UserRoundCheck },
+  { label: "Candidate Dashboard", icon: Users },
   { label: "Overview", icon: LayoutDashboard },
   { label: "Schedule", icon: CalendarDays },
   { label: "Candidates", icon: Users },
@@ -38,37 +44,38 @@ const [dataLoading, setDataLoading] = useState(true);
 const [dataError, setDataError] = useState("");
 const [schedulePreview, setSchedulePreview] = useState([]);
 const [generatingSchedule, setGeneratingSchedule] = useState(false);
+const [confirmingSchedule, setConfirmingSchedule] = useState(false);
 const [scheduleError, setScheduleError] = useState("");
 const [scheduleMessage, setScheduleMessage] = useState("");
 
-(() => {
-  async function loadDashboard() {
-    try {
-      setDataLoading(true);
-      setDataError("");
+// (() => {
+//   async function loadDashboard() {
+//     try {
+//       setDataLoading(true);
+//       setDataError("");
 
-      const [candidateData, interviewerData, roomData, interviewData] =
-        await Promise.all([
-          apiRequest("/candidates"),
-          apiRequest("/interviewers"),
-          apiRequest("/rooms"),
-          apiRequest("/schedule"),
-        ]);
+//       const [candidateData, interviewerData, roomData, interviewData] =
+//         await Promise.all([
+//           apiRequest("/candidates"),
+//           apiRequest("/interviewers"),
+//           apiRequest("/rooms"),
+//           apiRequest("/schedule"),
+//         ]);
 
-      setCandidates(candidateData);
-      setInterviewers(interviewerData);
-      setRooms(roomData);
-      setInterviews(interviewData);
-    } catch (error) {
-      console.error("Dashboard loading failed:", error);
-      setDataError(error.message);
-    } finally {
-      setDataLoading(false);
-    }
-  }
+//       setCandidates(candidateData);
+//       setInterviewers(interviewerData);
+//       setRooms(roomData);
+//       setInterviews(interviewData);
+//     } catch (error) {
+//       console.error("Dashboard loading failed:", error);
+//       setDataError(error.message);
+//     } finally {
+//       setDataLoading(false);
+//     }
+//   }
 
-  loadDashboard();
-}, []);
+//   loadDashboard();
+// }, []);
 
 useEffect(() => {
   apiRequest("/rounds")
@@ -88,13 +95,37 @@ useEffect(() => {
       setDataLoading(true);
       setDataError("");
 
-      const [candidateData, interviewerData, roomData, interviewData] =
-        await Promise.all([
+            const [candidateResult, interviewerResult, roomResult, interviewResult] =
+        await Promise.allSettled([
           apiRequest("/candidates"),
           apiRequest("/interviewers"),
           apiRequest("/rooms"),
           apiRequest("/schedule"),
         ]);
+
+      const candidateData =
+        candidateResult.status === "fulfilled"
+          ? candidateResult.value
+          : { candidates: [] };
+
+      const interviewerData =
+        interviewerResult.status === "fulfilled"
+          ? interviewerResult.value
+          : { interviewers: [] };
+
+      const roomData =
+        roomResult.status === "fulfilled"
+          ? roomResult.value
+          : { rooms: [] };
+
+      const interviewData =
+        interviewResult.status === "fulfilled"
+          ? interviewResult.value
+          : { interviews: [] };
+
+      if (interviewResult.status === "rejected") {
+        console.warn("Interviews could not load:", interviewResult.reason);
+      }
 
       console.log("Candidates response:", candidateData);
       console.log("Interviewers response:", interviewerData);
@@ -104,25 +135,25 @@ useEffect(() => {
       setCandidates(
         Array.isArray(candidateData)
           ? candidateData
-          : candidateData.candidates || []
+          : candidateData?.candidates ?? []
       );
 
       setInterviewers(
         Array.isArray(interviewerData)
           ? interviewerData
-          : interviewerData.interviewers || []
+          : interviewerData?.interviewers ?? []
       );
 
       setRooms(
         Array.isArray(roomData)
           ? roomData
-          : roomData.rooms || []
+          : roomData?.rooms ?? []
       );
 
       setInterviews(
         Array.isArray(interviewData)
           ? interviewData
-          : interviewData.interviews || []
+          : interviewData?.interviews ?? []
       );
     } catch (error) {
       console.error("Dashboard loading failed:", error);
@@ -162,6 +193,60 @@ async function handleGenerateSchedule() {
   } finally {
     setGeneratingSchedule(false);
   }
+}
+
+async function handleConfirmSchedule() {
+    if (schedulePreview.length === 0) {
+        setScheduleError("Generate a schedule first.");
+        return;
+    }
+
+    const approved = window.confirm(
+        `Confirm and save ${schedulePreview.length} interviews?`
+    );
+
+    if (!approved) {
+        return;
+    }
+
+    try {
+        setConfirmingSchedule(true);
+        setScheduleError("");
+        setScheduleMessage("");
+
+        const result = await apiRequest("/schedule/confirm", {
+            method: "POST",
+            body: JSON.stringify({
+                schedule: schedulePreview
+            })
+        });
+
+        if (!result.success) {
+            throw new Error(
+                result.message || "Could not confirm schedule."
+            );
+        }
+
+        const updated = await apiRequest("/schedule");
+
+        setInterviews(
+            Array.isArray(updated)
+                ? updated
+                : updated.interviews || []
+        );
+
+        setSchedulePreview([]);
+
+        setScheduleMessage(
+            `${result.count} interviews confirmed and saved successfully!`
+        );
+
+    } catch (error) {
+        console.error("Schedule confirmation failed:", error);
+        setScheduleError(error.message);
+    } finally {
+        setConfirmingSchedule(false);
+    }
 }
 
   return (
@@ -226,6 +311,14 @@ async function handleGenerateSchedule() {
 </div>
 
         <section className="page-content">
+          {activePage === "Candidate Dashboard" ? (
+            <CandidateDashboard />
+          ) : activePage === "Interviewer Dashboard" ? (
+            <InterviewerDashboard />
+          ) : activePage === "Calendar" ? (
+            <CalendarPage />
+          ) : (
+          <>
           <div className="welcome-row">
             <div>
               <p className="eyebrow">YOUR INTERVIEW WORKSPACE</p>
@@ -322,11 +415,25 @@ async function handleGenerateSchedule() {
               </td>
             </tr>
           ))}
+        
         </tbody>
       </table>
     </div>
+
+    <button
+      className="primary-button"
+      onClick={handleConfirmSchedule}
+      disabled={confirmingSchedule}
+      style={{ marginTop: 20 }}
+    >
+      <CheckCircle2 size={17} />
+      {confirmingSchedule
+        ? "Confirming..."
+        : `Confirm Schedule (${schedulePreview.length})`}
+    </button>
   </section>
 )}
+
 
 
 {dataError && (
@@ -437,58 +544,7 @@ async function handleGenerateSchedule() {
   <p className="error-message">{scheduleError}</p>
 )}
 
-{schedulePreview.length > 0 && (
-  <section className="panel preview-panel">
-    <div className="panel-header">
-      <div>
-        <h2>Generated schedule preview</h2>
-        <p>Review these proposed bookings before confirming them.</p>
-      </div>
-      <span className="preview-count">
-        {schedulePreview.length} proposed
-      </span>
-    </div>
 
-    <div className="schedule-table-wrapper">
-      <table className="schedule-table">
-        <thead>
-          <tr>
-            <th>Candidate</th>
-            <th>Round</th>
-            <th>Interviewer</th>
-            <th>Start</th>
-            <th>End</th>
-            <th>Room</th>
-          </tr>
-        </thead>
-        <tbody>
-          {schedulePreview.map((item, index) => (
-            <tr key={item.interviewId ?? item.id ?? index}>
-              <td>{item.candidateName || item.candidateId || "—"}</td>
-              <td>{item.roundName || item.roundId || "—"}</td>
-              <td>{item.interviewerName || item.interviewerId || "—"}</td>
-              <td>
-                {item.start
-                  ? new Date(item.start).toLocaleString()
-                  : item.startTime
-                    ? new Date(item.startTime).toLocaleString()
-                    : "—"}
-              </td>
-              <td>
-                {item.end
-                  ? new Date(item.end).toLocaleTimeString()
-                  : item.endTime
-                    ? new Date(item.endTime).toLocaleTimeString()
-                    : "—"}
-              </td>
-              <td>{item.roomName || item.roomId || "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  </section>
-)}
 
             <section className="panel activity-panel">
               <div className="panel-header">
@@ -526,7 +582,9 @@ async function handleGenerateSchedule() {
             <span>Frontend development mode</span>
             <CircleAlert size={15} />
           </div>
-        </section>
+        </>
+      )}
+    </section>
       </main>
     </div>
   );

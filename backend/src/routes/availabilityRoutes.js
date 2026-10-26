@@ -71,6 +71,114 @@ router.get("/candidates", async (req, res) => {
     }
 });
 
+// POST - Add interviewer availability
+router.post("/interviewers", async (req, res) => {
+    const { interviewerId, startTime, endTime } = req.body;
 
+    if (!interviewerId || !startTime || !endTime) {
+        return res.status(400).json({
+            status: "ERROR",
+            message: "Interviewer ID, start time and end time are required"
+        });
+    }
 
+    if (
+        !Number.isInteger(Number(interviewerId)) ||
+        Number(interviewerId) <= 0 ||
+        !Number.isFinite(Date.parse(startTime)) ||
+        !Number.isFinite(Date.parse(endTime)) ||
+        new Date(startTime) >= new Date(endTime)
+    ) {
+        return res.status(400).json({
+            status: "ERROR",
+            message: "Please provide a valid interviewer ID and time range"
+        });
+    }
+
+    try {
+        const result = await pool.query(
+            `INSERT INTO availability_slots
+                (interviewer_id, start_time, end_time, status)
+             VALUES ($1, $2, $3, 'available')
+             RETURNING *`,
+            [
+                Number(interviewerId),
+                startTime,
+                endTime
+            ]
+        );
+
+        res.status(201).json({
+            status: "OK",
+            message: "Interviewer availability saved successfully",
+            availability: result.rows[0]
+        });
+
+    } catch (error) {
+        console.error(
+            "Failed to save interviewer availability:",
+            error.message
+        );
+
+        res.status(500).json({
+            status: "ERROR",
+            message: "Could not save interviewer availability"
+        });
+    }
+});
+// POST - Save candidate availability
+router.post("/candidates", async (req, res) => {
+    const { candidateId, startTime, endTime } = req.body;
+
+    if (!candidateId || !startTime || !endTime) {
+        return res.status(400).json({
+            status: "ERROR",
+            message: "Candidate ID, start time and end time are required"
+        });
+    }
+
+    if (
+        !Number.isInteger(Number(candidateId)) ||
+        Number(candidateId) <= 0 ||
+        !Number.isFinite(Date.parse(startTime)) ||
+        !Number.isFinite(Date.parse(endTime)) ||
+        new Date(startTime) >= new Date(endTime)
+    ) {
+        return res.status(400).json({
+            status: "ERROR",
+            message: "Please provide a valid candidate ID and time range"
+        });
+    }
+
+    try {
+        const result = await pool.query(
+            `INSERT INTO candidate_availability
+                (candidate_id, start_time, end_time)
+             VALUES ($1, $2, $3)
+             RETURNING *`,
+            [
+                Number(candidateId),
+                startTime,
+                endTime
+            ]
+        );
+
+        res.status(201).json({
+            status: "OK",
+            message: "Candidate availability saved successfully",
+            availability: result.rows[0]
+        });
+
+    } catch (error) {
+        console.error(
+            "Failed to save candidate availability:",
+            error.message
+        );
+
+        res.status(500).json({
+            status: "ERROR",
+            message: "Could not save candidate availability"
+        });
+    }
+});
 module.exports = router;
