@@ -63,6 +63,57 @@ function downloadICS(interview) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function downloadAllICS(interviews) {
+  const validInterviews = interviews.filter(
+    (item) => item.start && item.end
+  );
+
+  if (validInterviews.length === 0) return;
+
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//OptiSlot//Interview Calendar//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+  ];
+
+  validInterviews.forEach((interview) => {
+    lines.push(
+      "BEGIN:VEVENT",
+      `UID:optislot-${interview.id}@optislot.local`,
+      `DTSTAMP:${toICSDate(new Date())}`,
+      `DTSTART:${toICSDate(interview.start)}`,
+      `DTEND:${toICSDate(interview.end)}`,
+      `SUMMARY:${escapeICS(
+        `OptiSlot - ${interview.roundName || "Interview"}`
+      )}`,
+      `DESCRIPTION:${escapeICS(
+        `Candidate: ${interview.candidateName || interview.candidateId}\nInterviewer: ${interview.interviewerName || interview.interviewerId}`
+      )}`,
+      `LOCATION:${escapeICS(interview.roomName || "Online / TBD")}`,
+      "END:VEVENT"
+    );
+  });
+
+  lines.push("END:VCALENDAR");
+
+  const blob = new Blob(
+    [lines.join("\r\n") + "\r\n"],
+    { type: "text/calendar;charset=utf-8" }
+  );
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "optislot-interviews.ics";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+
 export default function CalendarPage() {
   const [interviews, setInterviews] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -123,14 +174,27 @@ export default function CalendarPage() {
             <p>Download an .ics file for each confirmed booking.</p>
           </div>
 
-          <button
-            className="secondary-button"
-            onClick={loadInterviews}
-            disabled={loading}
-          >
-            <RefreshCw size={16} />
-            {loading ? "Loading..." : "Refresh"}
-          </button>
+          
+<div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+  <button
+    className="secondary-button"
+    onClick={() => downloadAllICS(scheduled)}
+    disabled={scheduled.length === 0 || loading}
+  >
+    <Download size={16} />
+    Download All (.ics)
+  </button>
+
+  <button
+    className="secondary-button"
+    onClick={loadInterviews}
+    disabled={loading}
+  >
+    <RefreshCw size={16} />
+    {loading ? "Loading..." : "Refresh"}
+  </button>
+</div>
+
         </div>
 
         {error && (
